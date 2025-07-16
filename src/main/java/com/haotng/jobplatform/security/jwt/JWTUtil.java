@@ -18,7 +18,7 @@ public class JWTUtil {
     private String secret;
 
     @Value("${jwt.expiration}")
-    private long expirationTime;
+    private long expirationTime ;
 
     public String generateToken(UserDetails userDetails) {
         SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
@@ -27,7 +27,7 @@ public class JWTUtil {
                 .setSubject(userDetails.getUsername())
                 .claim("roles", userDetails.getAuthorities())
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + 86400000))
+                .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }

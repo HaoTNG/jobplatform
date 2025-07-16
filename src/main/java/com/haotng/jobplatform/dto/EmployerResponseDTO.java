@@ -1,16 +1,13 @@
 package com.haotng.jobplatform.dto;
 
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
-public class EmployerRegisterDTO {
-    @NotBlank(message = "Company name cannot be empty")
+public class EmployerResponseDTO {
+    private Long id;
     private String companyName;
-
     private String industry;
-
     private String website;
-
     private String address;
+    private String userEmail;
 }

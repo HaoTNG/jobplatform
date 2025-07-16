@@ -1,48 +1,55 @@
 package com.haotng.jobplatform.controller;
 
-
-import com.haotng.jobplatform.entity.*;
-import com.haotng.jobplatform.respository.*;
-import lombok.*;
-import org.springframework.http.*;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import java.util.List;
 import com.haotng.jobplatform.dto.EmployerRegisterDTO;
+import com.haotng.jobplatform.dto.EmployerResponseDTO;
+import com.haotng.jobplatform.entity.Employer;
+import com.haotng.jobplatform.entity.Job;
+import com.haotng.jobplatform.entity.Role;
+import com.haotng.jobplatform.respository.EmployerRepository;
+import com.haotng.jobplatform.respository.JobRepository;
+import com.haotng.jobplatform.respository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 import org.springframework.web.server.ResponseStatusException;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/employers")
 @RequiredArgsConstructor
+@Slf4j
 public class EmployerController {
 
     private final EmployerRepository employerRepository;
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
     private final JobRepository jobRepository;
 
     @PostMapping
-    public ResponseEntity<Employer> createEmployer(@RequestBody EmployerRegisterDTO dto) {
-        User user;
+    public ResponseEntity<EmployerResponseDTO> createEmployer(@Valid @RequestBody EmployerRegisterDTO dto) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Creating Employer profile for email: {}", email);
 
-        if (dto.getUserId() != null) {
-            user = userRepository.findById(dto.getUserId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-        } else {
-            if (dto.getEmail() == null || dto.getPassword() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lacking email or password");
-            }
+        // Kiểm tra xem user đã có profile Employer chưa
+        if (employerRepository.findByUserEmail(email).isPresent()) {
+            log.warn("Employer profile already exists for email: {}", email);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
 
-            if (userRepository.existsByEmail(dto.getEmail())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
-            }
+        // Lấy user hiện tại
+        var user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-            user = User.builder()
-                    .email(dto.getEmail())
-                    .password(passwordEncoder.encode(dto.getPassword()))
-                    .role(Role.EMPLOYER)
-                    .build();
-            userRepository.save(user);
+        // Kiểm tra role
+        if (user.getRole() != Role.EMPLOYER) {
+            log.warn("User {} does not have EMPLOYER role", email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
         }
 
         Employer employer = Employer.builder()
@@ -53,42 +60,134 @@ public class EmployerController {
                 .user(user)
                 .build();
 
-
         employerRepository.save(employer);
-        return ResponseEntity.status(HttpStatus.CREATED).body(employer);
+        log.info("Employer profile created for email: {}", email);
+
+        EmployerResponseDTO response = mapToResponseDTO(employer);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping
-    public List<Employer> getAll(){
-        return employerRepository.findAll();
+    public ResponseEntity<Page<EmployerResponseDTO>> getAll(Pageable pageable) {
+        // Chỉ ADMIN được truy cập danh sách
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        var user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (user.getRole() != Role.ADMIN) {
+            log.warn("Access denied to getAllEmployers for email: {}", email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
+        Page<EmployerResponseDTO> page = employerRepository.findAll(pageable)
+                .map(this::mapToResponseDTO);
+        return ResponseEntity.ok(page);
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<Employer> getById(@PathVariable Long id){
-        return employerRepository.findById(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<?> getById(@PathVariable Long id) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Fetching Employer with id: {} for email: {}", id, email);
+        Employer employer = employerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Employer not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found");
+                });
+
+        if (!employer.getUser().getEmail().equals(email)) {
+            log.warn("Access denied to Employer id: {} for email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("{\"error\": \"Access denied\"}");
+        }
+
+        return ResponseEntity.ok(mapToResponseDTO(employer));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<EmployerResponseDTO> getMe() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Fetching Employer profile for email: {}", email);
+        Employer employer = employerRepository.findByUserEmail(email)
+                .orElseThrow(() -> {
+                    log.warn("Employer not found for email: {}", email);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found");
+                });
+        return ResponseEntity.ok(mapToResponseDTO(employer));
     }
 
     @GetMapping("/{id}/jobs")
-    public List<Job> getJobsByEmployerId(@PathVariable Long id){
-        return jobRepository.findByEmployerId(id);
+    public ResponseEntity<List<Job>> getJobsByEmployerId(@PathVariable Long id) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Fetching jobs for Employer id: {} by email: {}", id, email);
+        Employer employer = employerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Employer not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found");
+                });
+
+        if (!employer.getUser().getEmail().equals(email) &&
+                userRepository.findByEmail(email)
+                        .map(user -> user.getRole() != Role.ADMIN)
+                        .orElse(true)) {
+            log.warn("Access denied to jobs for Employer id: {} by email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
+        List<Job> jobs = jobRepository.findByEmployerId(id);
+        return ResponseEntity.ok(jobs);
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<Employer> updateEmployer(@PathVariable Long id, @RequestBody EmployerRegisterDTO dto) {
-        Employer existing = employerRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found"));
-        if (dto.getCompanyName() != null) existing.setCompanyName(dto.getCompanyName());
-        if (dto.getIndustry() != null) existing.setIndustry(dto.getIndustry());
-        if (dto.getWebsite() != null) existing.setWebsite(dto.getWebsite());
-        if (dto.getAddress() != null) existing.setAddress(dto.getAddress());
+    public ResponseEntity<EmployerResponseDTO> updateEmployer(@PathVariable Long id, @Valid @RequestBody EmployerRegisterDTO dto) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Updating Employer with id: {} for email: {}", id, email);
+        Employer employer = employerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Employer not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found");
+                });
 
-        employerRepository.save(existing);
-        return ResponseEntity.ok(existing);
+        if (!employer.getUser().getEmail().equals(email)) {
+            log.warn("Access denied to update Employer id: {} for email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
+        if (dto.getCompanyName() != null) employer.setCompanyName(dto.getCompanyName());
+        if (dto.getIndustry() != null) employer.setIndustry(dto.getIndustry());
+        if (dto.getWebsite() != null) employer.setWebsite(dto.getWebsite());
+        if (dto.getAddress() != null) employer.setAddress(dto.getAddress());
+
+        employerRepository.save(employer);
+        log.info("Employer updated successfully: {}", id);
+        return ResponseEntity.ok(mapToResponseDTO(employer));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteEmployer(@PathVariable Long id){
-        Employer employer = employerRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found"));
+    public ResponseEntity<Void> deleteEmployer(@PathVariable Long id) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Deleting Employer with id: {} for email: {}", id, email);
+        Employer employer = employerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("Employer not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found");
+                });
+
+        if (!employer.getUser().getEmail().equals(email)) {
+            log.warn("Access denied to delete Employer id: {} for email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
         employerRepository.delete(employer);
+        log.info("Employer deleted successfully: {}", id);
         return ResponseEntity.noContent().build();
+    }
+
+    private EmployerResponseDTO mapToResponseDTO(Employer employer) {
+        EmployerResponseDTO dto = new EmployerResponseDTO();
+        dto.setId(employer.getId());
+        dto.setCompanyName(employer.getCompanyName());
+        dto.setIndustry(employer.getIndustry());
+        dto.setWebsite(employer.getWebsite());
+        dto.setAddress(employer.getAddress());
+        dto.setUserEmail(employer.getUser().getEmail());
+        return dto;
     }
 }

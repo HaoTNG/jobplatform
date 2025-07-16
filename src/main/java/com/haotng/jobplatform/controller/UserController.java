@@ -25,10 +25,12 @@ public class UserController {
     private final JobSeekerRepository jobSeekerRepository;
     private final PasswordEncoder passwordEncoder;
 
-    @PostMapping
+    @PostMapping("/register")
     public ResponseEntity<User> createUser(@RequestBody User user){
+        user.setPassword(passwordEncoder.encode(user.getPassword()));
         return ResponseEntity.ok(userRepository.save(user));
     }
+
 
     @GetMapping
     public ResponseEntity<List<User>> getAllUsers(){

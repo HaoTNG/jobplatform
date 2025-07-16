@@ -1,48 +1,51 @@
+
 package com.haotng.jobplatform.controller;
 
-
-import com.haotng.jobplatform.entity.*;
-import com.haotng.jobplatform.respository.*;
-import lombok.*;
-import org.springframework.http.*;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.security.crypto.password.*;
-import org.springframework.web.server.ResponseStatusException;
 import com.haotng.jobplatform.dto.JobSeekerRegisterDTO;
-import java.util.List;
+import com.haotng.jobplatform.dto.JobSeekerResponseDTO;
+import com.haotng.jobplatform.entity.JobSeeker;
+import com.haotng.jobplatform.entity.Role;
+import com.haotng.jobplatform.respository.JobSeekerRepository;
+import com.haotng.jobplatform.respository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/jobseekers")
 @RequiredArgsConstructor
+@Slf4j
 public class JobSeekerController {
+
     private final JobSeekerRepository jobSeekerRepository;
     private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
 
     @PostMapping
-    public ResponseEntity<JobSeeker> createJobSeeker(@RequestBody JobSeekerRegisterDTO dto) {
-        User user;
+    public ResponseEntity<JobSeekerResponseDTO> createJobSeeker(@Valid @RequestBody JobSeekerRegisterDTO dto) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Creating JobSeeker profile for email: {}", email);
 
-        if (dto.getUserId() != null) {
-            // ✅ Gán user từ DB nếu đã có userId
-            user = userRepository.findById(dto.getUserId())
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-        } else {
-            // ✅ Tự tạo user nếu userId chưa có
-            if (dto.getEmail() == null || dto.getPassword() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lacking email or password");
-            }
+        // Kiểm tra xem user đã có profile JobSeeker chưa
+        if (jobSeekerRepository.findByUserEmail(email).isPresent()) {
+            log.warn("JobSeeker profile already exists for email: {}", email);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
+        }
 
-            if (userRepository.existsByEmail(dto.getEmail())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
-            }
+        // Lấy user hiện tại
+        var user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-            user = User.builder()
-                    .email(dto.getEmail())
-                    .password(passwordEncoder.encode(dto.getPassword()))
-                    .role(Role.JOB_SEEKER)
-                    .build();
-            userRepository.save(user);
+        // Kiểm tra role
+        if (user.getRole() != Role.JOB_SEEKER) {
+            log.warn("User {} does not have JOB_SEEKER role", email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
         }
 
         JobSeeker seeker = JobSeeker.builder()
@@ -55,40 +58,113 @@ public class JobSeekerController {
                 .build();
 
         jobSeekerRepository.save(seeker);
-        return ResponseEntity.status(HttpStatus.CREATED).body(seeker);
+        log.info("JobSeeker profile created for email: {}", email);
+
+        JobSeekerResponseDTO response = mapToResponseDTO(seeker);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping
-    public List<JobSeeker> getAllJobSeeker(){
-        return jobSeekerRepository.findAll();
+    public ResponseEntity<Page<JobSeekerResponseDTO>> getAllJobSeekers(Pageable pageable) {
+        // Chỉ ADMIN được truy cập danh sách
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        var user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (user.getRole() != Role.ADMIN) {
+            log.warn("Access denied to getAllJobSeekers for email: {}", email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
+        Page<JobSeekerResponseDTO> page = jobSeekerRepository.findAll(pageable)
+                .map(this::mapToResponseDTO);
+        return ResponseEntity.ok(page);
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<JobSeekerResponseDTO> getMe() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Fetching JobSeeker profile for email: {}", email);
+        JobSeeker seeker = jobSeekerRepository.findByUserEmail(email)
+                .orElseThrow(() -> {
+                    log.warn("JobSeeker not found for email: {}", email);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found");
+                });
+        return ResponseEntity.ok(mapToResponseDTO(seeker));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<JobSeeker> getById(@PathVariable Long id){
-        return jobSeekerRepository.findById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<?> getById(@PathVariable Long id) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Fetching JobSeeker with id: {} for email: {}", id, email);
+        JobSeeker seeker = jobSeekerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("JobSeeker not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found");
+                });
+
+        if (!seeker.getUser().getEmail().equals(email)) {
+            log.warn("Access denied to JobSeeker id: {} for email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("{\"error\": \"Access denied\"}");
+        }
+
+        return ResponseEntity.ok(mapToResponseDTO(seeker));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<JobSeeker> updateJobSeeker(@PathVariable Long id, @RequestBody JobSeekerRegisterDTO dto){
-        JobSeeker existing = jobSeekerRepository.findById(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found"));
+    public ResponseEntity<JobSeekerResponseDTO> updateJobSeeker(@PathVariable Long id, @Valid @RequestBody JobSeekerRegisterDTO dto) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Updating JobSeeker with id: {} for email: {}", id, email);
+        JobSeeker seeker = jobSeekerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("JobSeeker not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found");
+                });
 
-        if (dto.getFullName() != null) existing.setFullName(dto.getFullName());
-        if (dto.getPhone() != null) existing.setPhone(dto.getPhone());
-        if (dto.getAddress() != null) existing.setAddress(dto.getAddress());
-        if (dto.getSkills() != null) existing.setSkills(dto.getSkills());
-        if (dto.getExperience() != null) existing.setExperience(dto.getExperience());
+        if (!seeker.getUser().getEmail().equals(email)) {
+            log.warn("Access denied to update JobSeeker id: {} for email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
 
-        jobSeekerRepository.save(existing);
-        return ResponseEntity.ok(existing);
+        if (dto.getFullName() != null) seeker.setFullName(dto.getFullName());
+        if (dto.getPhone() != null) seeker.setPhone(dto.getPhone());
+        if (dto.getAddress() != null) seeker.setAddress(dto.getAddress());
+        if (dto.getSkills() != null) seeker.setSkills(dto.getSkills());
+        if (dto.getExperience() != null) seeker.setExperience(dto.getExperience());
 
+        jobSeekerRepository.save(seeker);
+        log.info("JobSeeker updated successfully: {}", id);
+        return ResponseEntity.ok(mapToResponseDTO(seeker));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteJobSeeker(@PathVariable Long id){
-        JobSeeker existing = jobSeekerRepository.findById(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found"));
-        jobSeekerRepository.delete(existing);
+    public ResponseEntity<Void> deleteJobSeeker(@PathVariable Long id) {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        log.info("Deleting JobSeeker with id: {} for email: {}", id, email);
+        JobSeeker seeker = jobSeekerRepository.findById(id)
+                .orElseThrow(() -> {
+                    log.warn("JobSeeker not found with id: {}", id);
+                    return new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found");
+                });
+
+        if (!seeker.getUser().getEmail().equals(email)) {
+            log.warn("Access denied to delete JobSeeker id: {} for email: {}", id, email);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+        }
+
+        jobSeekerRepository.delete(seeker);
+        log.info("JobSeeker deleted successfully: {}", id);
         return ResponseEntity.noContent().build();
+    }
+
+    private JobSeekerResponseDTO mapToResponseDTO(JobSeeker seeker) {
+        JobSeekerResponseDTO dto = new JobSeekerResponseDTO();
+        dto.setId(seeker.getId());
+        dto.setFullName(seeker.getFullName());
+        dto.setPhone(seeker.getPhone());
+        dto.setAddress(seeker.getAddress());
+        dto.setSkills(seeker.getSkills());
+        dto.setExperience(seeker.getExperience());
+        dto.setUserEmail(seeker.getUser().getEmail());
+        return dto;
     }
 }
