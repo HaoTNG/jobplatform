@@ -1,4 +1,5 @@
 package com.haotng.jobplatform.dto;
+
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -19,4 +20,28 @@ public class RegisterRequest {
     @Pattern(regexp = "^(EMPLOYER|JOB_SEEKER|ADMIN)$",
             message = "Role must be EMPLOYER, JOB_SEEKER, or ADMIN")
     private String role;
+
+    // Fields for Employer
+    @NotBlank(message = "Company name is required for EMPLOYER", groups = EmployerValidation.class)
+    private String companyName;
+
+    private String industry;
+
+    private String website;
+
+    private String address;
+
+    // Fields for JobSeeker
+    @NotBlank(message = "Full name is required for JOB_SEEKER", groups = JobSeekerValidation.class)
+    private String fullName;
+
+    private String phone;
+
+    private String skills;
+
+    private String experience;
+
+    // Validation groups
+    public interface EmployerValidation {}
+    public interface JobSeekerValidation {}
 }
