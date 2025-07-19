@@ -17,7 +17,7 @@ public class Job {
     private String title;
     private String description;
     private String location;
-    private String salary;
+    private Double salary;
 
     @ManyToOne
     @JoinColumn(name = "employer_id", nullable = false)

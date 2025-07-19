@@ -2,6 +2,7 @@ package com.haotng.jobplatform.controller;
 
 import com.haotng.jobplatform.entity.Employer;
 import com.haotng.jobplatform.entity.JobSeeker;
+import com.haotng.jobplatform.entity.Role;
 import com.haotng.jobplatform.entity.User;
 import com.haotng.jobplatform.respository.EmployerRepository;
 import com.haotng.jobplatform.respository.JobSeekerRepository;
@@ -9,6 +10,7 @@ import com.haotng.jobplatform.respository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
@@ -18,80 +20,66 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/users")
-@RequiredArgsConstructor
 public class UserController {
+
     private final UserRepository userRepository;
     private final EmployerRepository employerRepository;
     private final JobSeekerRepository jobSeekerRepository;
-    private final PasswordEncoder passwordEncoder;
 
-    @PostMapping("/register")
-    public ResponseEntity<User> createUser(@RequestBody User user){
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        return ResponseEntity.ok(userRepository.save(user));
+    public UserController(UserRepository userRepository, EmployerRepository employerRepository, JobSeekerRepository jobSeekerRepository) {
+        this.userRepository = userRepository;
+        this.employerRepository = employerRepository;
+        this.jobSeekerRepository = jobSeekerRepository;
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser(Authentication authentication) {
+        String email = authentication.getName();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
 
-    @GetMapping
-    public ResponseEntity<List<User>> getAllUsers(){
-        return ResponseEntity.ok(userRepository.findAll());
-    }
-
-    @GetMapping("/{id}")
-    public ResponseEntity<User> getUserById(@PathVariable Long id){
-        return userRepository.findById(id).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
-    }
-
-    @GetMapping("/email")
-    public ResponseEntity<User> getByEmail(@RequestParam String email) {
-        return userRepository.findByEmail(email).map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
-    }
-
-    @PutMapping("/{id}")
-    public ResponseEntity<User> updateUser(@PathVariable Long id, @RequestBody User updated) {
-        User existing = userRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
-
-        // Check trùng email nếu đang đổi email
-        if (updated.getEmail() != null && !updated.getEmail().equals(existing.getEmail())) {
-            if (userRepository.existsByEmail(updated.getEmail())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exists");
-            }
-            existing.setEmail(updated.getEmail());
+        if ("EMPLOYER".equals(user.getRole())) {
+            Employer employer = employerRepository.findByUserId(user.getId())
+                    .orElseThrow(() -> new RuntimeException("Employer not found"));
+            return ResponseEntity.ok(new UserResponse(user.getId(), user.getEmail(), user.getRole(), employer.getId()));
+        } else if ("JOB_SEEKER".equals(user.getRole())) {
+            JobSeeker jobSeeker = jobSeekerRepository.findByUserId(user.getId())
+                    .orElseThrow(() -> new RuntimeException("JobSeeker not found"));
+            return ResponseEntity.ok(new UserResponse(user.getId(), user.getEmail(), user.getRole(), jobSeeker.getId()));
+        } else {
+            throw new RuntimeException("Invalid user role");
         }
 
-        if (updated.getPassword() != null) {
-            existing.setPassword(passwordEncoder.encode(updated.getPassword()));
-        }
 
-        if (updated.getRole() != null) {
-            existing.setRole(updated.getRole());
-        }
-
-        userRepository.save(existing);
-        return ResponseEntity.ok(existing);
     }
 
+    static class UserResponse {
+        private final Long userId;
+        private final String email;
+        private final Role role;
+        private final Long profileId;
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User không tồn tại"));
-
-        // Kiểm tra nếu user đang được gán vào Employer
-        Employer employer = employerRepository.findByUserId(id);
-        if (employer != null) {
-            employerRepository.delete(employer);
+        public UserResponse(Long userId, String email, Role role, Long profileId) {
+            this.userId = userId;
+            this.email = email;
+            this.role = role;
+            this.profileId = profileId;
         }
 
-        // Nếu có luồng JobSeeker thì xử lý tương tự
-        JobSeeker jobSeeker = jobSeekerRepository.findByUserId(id);
-        if (jobSeeker != null) {
-            jobSeekerRepository.delete(jobSeeker);
+        public Long getUserId() {
+            return userId;
         }
 
-        userRepository.delete(user);
-        return ResponseEntity.noContent().build(); // 204 No Content
+        public String getEmail() {
+            return email;
+        }
+
+        public Role getRole() {
+            return role;
+        }
+
+        public Long getProfileId() {
+            return profileId;
+        }
     }
-
-}
+}    

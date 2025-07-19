@@ -11,6 +11,8 @@ import com.haotng.jobplatform.respository.EmployerRepository;
 import com.haotng.jobplatform.respository.JobSeekerRepository;
 import com.haotng.jobplatform.respository.UserRepository;
 import com.haotng.jobplatform.security.jwt.JWTUtil;
+import jakarta.validation.Valid;
+import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -22,7 +24,12 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-import jakarta.validation.Valid;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.groups.Default;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -36,6 +43,7 @@ public class AuthController {
     private final EmployerRepository employerRepository;
     private final JobSeekerRepository jobSeekerRepository;
     private final PasswordEncoder passwordEncoder;
+    private final Validator validator;
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody AuthRequest request) {
@@ -54,10 +62,27 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<?> register(
-            @Validated({RegisterRequest.EmployerValidation.class, RegisterRequest.JobSeekerValidation.class})
-            @RequestBody RegisterRequest request) {
+    public ResponseEntity<?> register(@RequestBody RegisterRequest request) {
         log.info("Register attempt for email: {}", request.getEmail());
+
+        // Validate cơ bản (email, password, role) + nhóm theo role
+        Set<ConstraintViolation<RegisterRequest>> violations;
+        if ("EMPLOYER".equals(request.getRole())) {
+            violations = validator.validate(request, Default.class, RegisterRequest.EmployerValidation.class);
+        } else if ("JOB_SEEKER".equals(request.getRole())) {
+            violations = validator.validate(request, Default.class, RegisterRequest.JobSeekerValidation.class);
+        } else {
+            violations = validator.validate(request, Default.class);
+        }
+
+        if (!violations.isEmpty()) {
+            Map<String, String> errors = new HashMap<>();
+            for (ConstraintViolation<RegisterRequest> violation : violations) {
+                errors.put(violation.getPropertyPath().toString(), violation.getMessage());
+            }
+            log.warn("Validation failed for email: {}. Errors: {}", request.getEmail(), errors);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errors);
+        }
 
         // Kiểm tra email trùng lặp
         if (userRepository.findByEmail(request.getEmail()).isPresent()) {
@@ -65,20 +90,25 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("{\"error\": \"Email already exists\"}");
         }
 
+        // Kiểm tra role hợp lệ
+        Role role;
+        try {
+            role = Role.valueOf(request.getRole());
+        } catch (IllegalArgumentException e) {
+            log.warn("Registration failed: Invalid role {}", request.getRole());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("{\"error\": \"Invalid role\"}");
+        }
+
         // Tạo User
         User user = User.builder()
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
-                .role(Role.valueOf(request.getRole()))
+                .role(role)
                 .build();
         userRepository.save(user);
 
         // Tạo profile dựa trên role
-        if (user.getRole() == Role.EMPLOYER) {
-            if (request.getCompanyName() == null || request.getCompanyName().isBlank()) {
-                log.warn("Registration failed: Company name is required for EMPLOYER");
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("{\"error\": \"Company name is required for EMPLOYER\"}");
-            }
+        if (role == Role.EMPLOYER) {
             Employer employer = Employer.builder()
                     .user(user)
                     .companyName(request.getCompanyName())
@@ -88,11 +118,7 @@ public class AuthController {
                     .build();
             employerRepository.save(employer);
             log.info("Employer profile created for email: {}", request.getEmail());
-        } else if (user.getRole() == Role.JOB_SEEKER) {
-            if (request.getFullName() == null || request.getFullName().isBlank()) {
-                log.warn("Registration failed: Full name is required for JOB_SEEKER");
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("{\"error\": \"Full name is required for JOB_SEEKER\"}");
-            }
+        } else if (role == Role.JOB_SEEKER) {
             JobSeeker jobSeeker = JobSeeker.builder()
                     .user(user)
                     .fullName(request.getFullName())
