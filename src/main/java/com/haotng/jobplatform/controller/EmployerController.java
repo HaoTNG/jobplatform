@@ -135,20 +135,16 @@ public class EmployerController {
         return ResponseEntity.ok(jobs);
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<EmployerResponseDTO> updateEmployer(@PathVariable Long id, @Valid @RequestBody EmployerRegisterDTO dto) {
+    @PutMapping("/me")
+    public ResponseEntity<EmployerResponseDTO> updateEmployer(@Valid @RequestBody EmployerRegisterDTO dto) {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        log.info("Updating Employer with id: {} for email: {}", id, email);
-        Employer employer = employerRepository.findById(id)
+        log.info("Updating Employer profile for email: {}", email);
+
+        Employer employer = employerRepository.findByUserEmail(email)
                 .orElseThrow(() -> {
-                    log.warn("Employer not found with id: {}", id);
+                    log.warn("Employer not found for email: {}", email);
                     return new ResponseStatusException(HttpStatus.NOT_FOUND, "Employer not found");
                 });
-
-        if (!employer.getUser().getEmail().equals(email)) {
-            log.warn("Access denied to update Employer id: {} for email: {}", id, email);
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
-        }
 
         if (dto.getCompanyName() != null) employer.setCompanyName(dto.getCompanyName());
         if (dto.getIndustry() != null) employer.setIndustry(dto.getIndustry());
@@ -156,7 +152,7 @@ public class EmployerController {
         if (dto.getAddress() != null) employer.setAddress(dto.getAddress());
 
         employerRepository.save(employer);
-        log.info("Employer updated successfully: {}", id);
+        log.info("Employer updated successfully for email: {}", email);
         return ResponseEntity.ok(mapToResponseDTO(employer));
     }
 

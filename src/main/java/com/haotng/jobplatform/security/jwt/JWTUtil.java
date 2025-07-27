@@ -1,5 +1,6 @@
 package com.haotng.jobplatform.security.jwt;
 
+import com.haotng.jobplatform.entity.Role;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,56 +9,47 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.Key;
 import java.util.Date;
 import java.util.List;
 
 @Component
 public class JWTUtil {
 
-    @Value("${jwt.secret}")
-    private String secret;
+    private final Key SECRET_KEY = Keys.secretKeyFor(SignatureAlgorithm.HS512); // Generates a secure 512-bit key
+    private final long EXPIRATION_TIME = 86400000; // 1 day in milliseconds
 
-    @Value("${jwt.expiration}")
-    private long expirationTime ;
-
-    public String generateToken(UserDetails userDetails) {
-        SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-
+    public String generateToken(String email, String role) {
         return Jwts.builder()
-                .setSubject(userDetails.getUsername())
-                .claim("roles", userDetails.getAuthorities())
+                .setSubject(email)
+                .claim("role", role)
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + expirationTime))
-                .signWith(key, SignatureAlgorithm.HS256)
+                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
+                .signWith(SECRET_KEY, SignatureAlgorithm.HS512)
                 .compact();
     }
 
-    public String extractUsername(String token){
-        return parseToken(token).getBody().getSubject();
-    }
-
-    public List<String> extractRoles(String token) {
-        Claims claims = parseToken(token).getBody();
-        return (List<String>) claims.get("roles");
-    }
-
-    private Jws<Claims> parseToken(String token){
-        SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    public String extractUsername(String token) {
         return Jwts.parserBuilder()
-                .setSigningKey(key)
+                .setSigningKey(SECRET_KEY)
                 .build()
-                .parseClaimsJws(token);
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
     }
 
-    public boolean isValid(String token, UserDetails userDetails) {
-        try {
-            Claims claims = parseToken(token).getBody();
-            return claims.getSubject().equals(userDetails.getUsername())
-                    && !claims.getExpiration().before(new Date());
-        } catch (JwtException e) {
-            return false;
-        }
+    public boolean validateToken(String token, UserDetails userDetails) {
+        String username = extractUsername(token);
+        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
     }
 
-
+    private boolean isTokenExpired(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(SECRET_KEY)
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getExpiration()
+                .before(new Date());
+    }
 }

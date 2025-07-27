@@ -31,15 +31,21 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Enable CORS
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/jobs").permitAll()
-                        .requestMatchers("/api/jobs/**").authenticated()
-                        .requestMatchers("/api/applications/**").authenticated()
+                        .requestMatchers("/api/auth/**" , "api/jobs").permitAll()
+                        .requestMatchers("/api/employers/me", "/api/jobseekers/me", "/api/applications/seeker").authenticated()
                         .anyRequest().authenticated()
+                )
+                .logout(logout -> logout
+                        .logoutUrl("/api/auth/logout")
+                        .logoutSuccessHandler((request, response, authentication) -> {
+                            response.setStatus(200);
+                        })
+                        .invalidateHttpSession(true)
+                        .clearAuthentication(true)
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

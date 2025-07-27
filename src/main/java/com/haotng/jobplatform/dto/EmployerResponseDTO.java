@@ -1,8 +1,10 @@
 package com.haotng.jobplatform.dto;
 
-import lombok.Data;
+import lombok.*;
 
 @Data
+@Getter
+@Setter
 public class EmployerResponseDTO {
     private Long id;
     private String companyName;

@@ -5,12 +5,15 @@ import lombok.*;
 @Data
 @Getter
 @Setter
-public class JobSeekerResponseDTO {
-    private Long id;
+public class UserDTO {
+    private String email;
+    private String role;
     private String fullName;
-    private String phone;
+    private String companyName;
     private String address;
+    private String industry;
+    private String website;
+    private String phone;
     private String skills;
     private String experience;
-    private String userEmail;
 }

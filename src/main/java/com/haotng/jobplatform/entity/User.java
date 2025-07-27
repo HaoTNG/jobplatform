@@ -27,6 +27,9 @@ public class User {
     @Enumerated(EnumType.STRING)
     private Role role;
 
+    @Column(name="full_name")
+    private String fullName;
+
     @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY, optional = true)
     private Employer employer;
 

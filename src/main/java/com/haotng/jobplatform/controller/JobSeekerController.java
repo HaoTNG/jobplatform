@@ -34,7 +34,7 @@ public class JobSeekerController {
 
         // Kiểm tra xem user đã có profile JobSeeker chưa
         if (jobSeekerRepository.findByUserEmail(email).isPresent()) {
-            log.warn("JobSeeker profile already exists for email: {}", email);
+            log.warn("you dont have the right to create a new jobseeker");
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(null);
         }
 
@@ -110,20 +110,16 @@ public class JobSeekerController {
         return ResponseEntity.ok(mapToResponseDTO(seeker));
     }
 
-    @PutMapping("/{id}")
-    public ResponseEntity<JobSeekerResponseDTO> updateJobSeeker(@PathVariable Long id, @Valid @RequestBody JobSeekerRegisterDTO dto) {
+    @PutMapping("/me")
+    public ResponseEntity<JobSeekerResponseDTO> updateJobSeeker(@Valid @RequestBody JobSeekerRegisterDTO dto) {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        log.info("Updating JobSeeker with id: {} for email: {}", id, email);
-        JobSeeker seeker = jobSeekerRepository.findById(id)
+        log.info("Updating JobSeeker profile for email: {}", email);
+
+        JobSeeker seeker = jobSeekerRepository.findByUserEmail(email)
                 .orElseThrow(() -> {
-                    log.warn("JobSeeker not found with id: {}", id);
+                    log.warn("JobSeeker not found for email: {}", email);
                     return new ResponseStatusException(HttpStatus.NOT_FOUND, "JobSeeker not found");
                 });
-
-        if (!seeker.getUser().getEmail().equals(email)) {
-            log.warn("Access denied to update JobSeeker id: {} for email: {}", id, email);
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
-        }
 
         if (dto.getFullName() != null) seeker.setFullName(dto.getFullName());
         if (dto.getPhone() != null) seeker.setPhone(dto.getPhone());
@@ -132,7 +128,7 @@ public class JobSeekerController {
         if (dto.getExperience() != null) seeker.setExperience(dto.getExperience());
 
         jobSeekerRepository.save(seeker);
-        log.info("JobSeeker updated successfully: {}", id);
+        log.info("JobSeeker updated successfully for email: {}", email);
         return ResponseEntity.ok(mapToResponseDTO(seeker));
     }
 
