@@ -2,16 +2,10 @@ package com.haotng.jobplatform.controller;
 
 import com.haotng.jobplatform.dto.UserDTO;
 import com.haotng.jobplatform.entity.User;
-import com.haotng.jobplatform.entity.Employer;
-import com.haotng.jobplatform.entity.JobSeeker;
-import com.haotng.jobplatform.entity.Role;
+
 import com.haotng.jobplatform.respository.UserRepository;
-import com.haotng.jobplatform.respository.EmployerRepository;
-import com.haotng.jobplatform.respository.JobSeekerRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
